@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Fake Artist - Handy</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { font-family: sans-serif; background: #2c3e50; color: white; text-align: center; padding: 15px; touch-action: none; }
+        input, button { width: 90%; padding: 15px; margin: 10px 0; font-size: 20px; border-radius: 8px; border: none; box-sizing: border-box; }
+        input { text-align: center; }
+        #room-code { text-transform: uppercase; font-family: monospace; letter-spacing: 2px; font-weight: bold; font-size: 24px; color: #f1c40f; background: #34495e; border: 2px solid #f1c40f; }
+        button { background: #e74c3c; color: white; font-weight: bold; cursor: pointer; }
+        #touch-pad { background: white; border-radius: 10px; border: 2px solid #ccc; width: 100%; max-width: 600px; aspect-ratio: 4/3; margin-top: 15px; }
+        .role-card { background: #34495e; padding: 15px; border-radius: 8px; font-size: 20px; margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+    <div id="join-screen">
+        <h2>Spiel beitreten</h2>
+        <p>Schau auf den Hauptbildschirm für den Code!</p>
+        <input type="text" id="room-code" placeholder="RAUM-CODE" maxlength="4">
+        <input type="text" id="name" placeholder="Dein Name">
+        <button onclick="join()">Beitreten</button>
+    </div>
+
+    <div id="wait-screen" style="display:none;">
+        <h3>Erfolgreich in Raum <span id="display-room" style="color: #f1c40f;"></span>!</h3>
+        <p>Warte auf den Start durch den Host...</p>
+    </div>
+
+    <div id="play-screen" style="display:none;">
+        <div id="role-display" class="role-card"></div>
+        <h3 id="turn-info">Warte, bis du dran bist...</h3>
+        <canvas id="touch-pad" width="600" height="450" style="display:none;"></canvas>
+        <button id="done-btn" style="display:none;" onclick="finishTurn()">Strich fertig!</button>
+    </div>
+
+    <script>
+        const socket = io();
+        let myTurn = false;
+        let hasDrawn = false;
+        let myRoomCode = '';
+        
+        const canvas = document.getElementById('touch-pad');
+        const ctx = canvas.getContext('2d');
+
+        function join() {
+            const name = document.getElementById('name').value;
+            const roomCode = document.getElementById('room-code').value;
+            if (name && roomCode) {
+                socket.emit('join-room', { name, roomCode });
+            } else {
+                alert("Bitte einen Namen und den Raum-Code eingeben!");
+            }
+        }
+
+        socket.on('error-msg', (msg) => alert(msg));
+
+        socket.on('joined-success', (code) => {
+            myRoomCode = code;
+            document.getElementById('join-screen').style.display = 'none';
+            document.getElementById('wait-screen').style.display = 'block';
+            document.getElementById('display-room').innerText = code;
+        });
+
+        socket.on('role-info', (data) => {
+            document.getElementById('wait-screen').style.display = 'none';
+            document.getElementById('play-screen').style.display = 'block';
+            
+            const roleCard = document.getElementById('role-display');
+            if (data.isSpy) {
+                roleCard.innerHTML = '<b style="color:#e74c3c;">Du bist der SPION!</b>';
+            } else {
+                roleCard.innerHTML = `Das Wort ist: <b style="color:#2ecc71;">${data.word}</b>`;
+            }
+        });
+
+        socket.on('your-turn', (history) => {
+            myTurn = true;
+            hasDrawn = false;
+            document.getElementById('turn-info').innerText = "Du bist dran! Zeichne hier:";
+            canvas.style.display = 'block';
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (history) {
+                history.forEach(data => drawData(data));
+            }
+        });
+
+        function drawData(data) {
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = '#2c3e50';
+            if (data.type === 'start') {
+                ctx.beginPath();
+                ctx.moveTo(data.x, data.y);
+            } else if (data.type === 'move') {
+                ctx.lineTo(data.x, data.y);
+                ctx.stroke();
+            }
+        }
+
+        socket.on('draw-stroke-all', (data) => {
+            if (myTurn) drawData(data);
+        });
+
+        function getCoords(e) {
+            const rect = canvas.getBoundingClientRect();
+            const touch = e.touches[0] || e.changedTouches[0];
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            return {
+                x: (touch.clientX - rect.left) * scaleX,
+                y: (touch.clientY - rect.top) * scaleY
+            };
+        }
+
+        canvas.addEventListener('touchstart', (e) => {
+            if (!myTurn || hasDrawn) return;
+            e.preventDefault();
+            const coords = getCoords(e);
+            socket.emit('draw-stroke', { roomCode: myRoomCode, stroke: { type: 'start', x: coords.x, y: coords.y } });
+        });
+
+        canvas.addEventListener('touchmove', (e) => {
+            if (!myTurn || hasDrawn) return;
+            e.preventDefault();
+            const coords = getCoords(e);
+            socket.emit('draw-stroke', { roomCode: myRoomCode, stroke: { type: 'move', x: coords.x, y: coords.y } });
+        });
+
+        canvas.addEventListener('touchend', (e) => {
+            if (!myTurn || hasDrawn) return;
+            e.preventDefault();
+            hasDrawn = true;
+            document.getElementById('done-btn').style.display = 'block';
+        });
+
+        function finishTurn() {
+            myTurn = false;
+            canvas.style.display = 'none';
+            document.getElementById('done-btn').style.display = 'none';
+            document.getElementById('turn-info').innerText = "Strich übertragen! Warte auf die anderen...";
+            socket.emit('finish-turn', myRoomCode);
+        }
+    </script>
+</body>
+</html>

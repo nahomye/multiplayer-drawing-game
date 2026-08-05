@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Fake Artist - Host</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { font-family: sans-serif; background: #1a252f; color: white; text-align: center; margin-top: 50px; }
+        #canvas { background: white; border-radius: 8px; border: 4px solid #34495e; }
+        .player-tag { display: inline-block; background: #34495e; padding: 10px 20px; margin: 10px; border-radius: 15px; font-size: 20px; }
+        button { padding: 15px 30px; font-size: 22px; background: #e74c3c; color: white; border: none; border-radius: 5px; cursor: pointer; transition: 0.3s; }
+        button:hover { background: #c0392b; }
+        #room-code-display { font-size: 80px; color: #f1c40f; letter-spacing: 10px; margin: 20px 0; font-family: monospace; font-weight: bold; }
+        .instruction { font-size: 24px; color: #bdc3c7; }
+    </style>
+</head>
+<body>
+    <h1>🎨 Fake Artist</h1>
+    
+    <div id="start-screen">
+        <p class="instruction">Bereit für eine Runde?</p>
+        <button onclick="createRoom()">Neuen Raum erstellen</button>
+    </div>
+
+    <div id="lobby" style="display:none;">
+        <p class="instruction">Auf dem Handy beitreten mit dem Code:</p>
+        <div id="room-code-display">----</div>
+        <h2>Verbundene Spieler:</h2>
+        <div id="player-list">Warte auf Spieler...</div>
+        <br><br>
+        <button onclick="startGame()">Spiel starten</button>
+    </div>
+
+    <div id="game-screen" style="display:none;">
+        <h2 id="status">Warte auf Zug...</h2>
+        <canvas id="canvas" width="600" height="450"></canvas>
+    </div>
+
+    <script>
+        const socket = io();
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let currentRoomCode = '';
+
+        function createRoom() {
+            socket.emit('create-room');
+        }
+
+        socket.on('room-created', (code) => {
+            currentRoomCode = code;
+            document.getElementById('start-screen').style.display = 'none';
+            document.getElementById('lobby').style.display = 'block';
+            document.getElementById('room-code-display').innerText = code;
+        });
+
+        socket.on('update-players', (players) => {
+            if (players.length > 0) {
+                document.getElementById('player-list').innerHTML = players.map(p => `<span class="player-tag">${p.name}</span>`).join('');
+            } else {
+                document.getElementById('player-list').innerHTML = 'Warte auf Spieler...';
+            }
+        });
+
+        socket.on('error-msg', (msg) => alert(msg));
+
+        function startGame() {
+            socket.emit('start-game', currentRoomCode);
+        }
+
+        socket.on('clear-canvas', () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        });
+
+        socket.on('game-started', (data) => {
+            document.getElementById('lobby').style.display = 'none';
+            document.getElementById('game-screen').style.display = 'block';
+            document.getElementById('status').innerText = `${data.currentPlayer} ist am Zug!`;
+        });
+
+        socket.on('next-turn', (data) => {
+            document.getElementById('status').innerText = `${data.currentPlayer} ist am Zug!`;
+        });
+
+        socket.on('draw-stroke-all', (data) => {
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = '#2c3e50';
+
+            if (data.type === 'start') {
+                ctx.beginPath();
+                ctx.moveTo(data.x, data.y);
+            } else if (data.type === 'move') {
+                ctx.lineTo(data.x, data.y);
+                ctx.stroke();
+            }
+        });
+
+        socket.on('game-over', (data) => {
+            alert(`🎉 Spiel zu Ende!
+
+Das Wort war: ${data.word}
+Der Spion war: ${data.spyName}`);
+            location.reload();
+        });
+    </script>
+</body>
+</html>
