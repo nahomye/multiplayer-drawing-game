@@ -1,12 +1,14 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+const path = require('path'); // <-- NEU: Path-Modul geladen
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-app.use(express.static('public'));
+// NEU: Absoluter Pfad für den public-Ordner (Kugelsicher für Render)
+app.use(express.static(path.join(__dirname, 'public')));
 
 const words = ["Elefant", "Eiffelturm", "Fahrrad", "Schneemann", "Pizza", "Hubschrauber", "Gitarre", "Kaffeetasse", "Pyramide", "Pinguin"];
 
@@ -143,7 +145,9 @@ io.on('connection', (socket) => {
     });
 });
 
-const PORT = 3000;
+// NEU: Dynamischer Port von Render
+const PORT = process.env.PORT || 3000; 
+
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server läuft auf Port ${PORT}`);
 });
