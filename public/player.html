@@ -83,12 +83,12 @@
 
         // 2. Spiel Infos empfangen
         socket.on('role-info', (data) => {
-            if (data.isSpy) {
-                document.getElementById('role-display').innerText = "🤫 Du bist der FAKE ARTIST! Versuch dich anzupassen.";
-            } else {
-                document.getElementById('role-display').innerText = `🎨 Das geheime Wort ist: ${data.word}`;
-            }
-        });
+                    if (data.isSpy) {
+                        document.getElementById('role-display').innerHTML = `Kategorie: <strong>${data.category}</strong><br><br>🤫 Du bist der FAKE ARTIST!`;
+                    } else {
+                        document.getElementById('role-display').innerHTML = `Kategorie: <strong>${data.category}</strong><br><br>🎨 Das Wort ist: <strong>${data.word}</strong>`;
+                    }
+                });
 
         socket.on('game-started', (data) => {
             document.getElementById('lobby').style.display = 'none';

@@ -9,7 +9,13 @@ const io = new Server(server);
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-const words = ["Elefant", "Eiffelturm", "Fahrrad", "Schneemann", "Pizza", "Hubschrauber", "Gitarre", "Kaffeetasse", "Pyramide", "Pinguin"];
+// NEU: Unsere Wort-Kategorien
+const categories = {
+    "Tiere": ["Elefant", "Pinguin", "Känguru", "Schlange", "Delfin", "Löwe"],
+    "Essen": ["Pizza", "Sushi", "Banane", "Croissant", "Spaghetti", "Eiscreme"],
+    "Gegenstände": ["Fahrrad", "Kaffeetasse", "Gitarre", "Hubschrauber", "Schneemann"],
+    "Orte & Gebäude": ["Eiffelturm", "Pyramide", "Krankenhaus", "Flughafen", "Gefängnis"]
+};
 const rooms = {};
 
 function generateRoomCode() {
@@ -66,32 +72,44 @@ io.on('connection', (socket) => {
         socket.emit('joined-success', roomCode);
     });
 
-    socket.on('start-game', (roomCode) => {
-        const room = rooms[roomCode];
-        if (!room || room.hostSocketId !== socket.id) return;
+    socket.on('start-game', (data) => {
+            // Wir empfangen jetzt den Code UND die Kategorie vom Host
+            const roomCode = data.roomCode;
+            const categoryName = data.category;
+            const room = rooms[roomCode];
+            
+            if (!room || room.hostSocketId !== socket.id) return;
 
-        if (room.players.length < 3) {
-            socket.emit('error-msg', 'Mindestens 3 Spieler erforderlich!');
-            return;
-        }
-
-        room.gameStarted = true;
-        room.drawingHistory = [];
-        room.votes = {}; // Stimmen zum Start zurücksetzen
-        io.to(roomCode).emit('clear-canvas');
-
-        room.secretWord = words[Math.floor(Math.random() * words.length)];
-        const spyIndex = Math.floor(Math.random() * room.players.length);
-        room.spySocketId = room.players[spyIndex].id;
-        room.currentTurnIndex = 0;
-        room.currentRound = 1;
-
-        room.players.forEach(p => {
-            if (p.id === room.spySocketId) {
-                io.to(p.id).emit('role-info', { isSpy: true });
-            } else {
-                io.to(p.id).emit('role-info', { isSpy: false, word: room.secretWord });
+            if (room.players.length < 3) {
+                socket.emit('error-msg', 'Mindestens 3 Spieler erforderlich!');
+                return;
             }
+
+            room.gameStarted = true;
+            room.drawingHistory = [];
+            room.votes = {};
+            io.to(roomCode).emit('clear-canvas');
+
+            // NEU: Wort aus der gewählten Kategorie aussuchen
+            const wordList = categories[categoryName];
+            room.secretWord = wordList[Math.floor(Math.random() * wordList.length)];
+            
+            const spyIndex = Math.floor(Math.random() * room.players.length);
+            room.spySocketId = room.players[spyIndex].id;
+            room.currentTurnIndex = 0;
+            room.currentRound = 1;
+
+            // NEU: Wir senden die Kategorie an ALLE, aber das Wort nur an die echten Künstler
+            room.players.forEach(p => {
+                if (p.id === room.spySocketId) {
+                    io.to(p.id).emit('role-info', { isSpy: true, category: categoryName });
+                } else {
+                    io.to(p.id).emit('role-info', { isSpy: false, word: room.secretWord, category: categoryName });
+                }
+            });
+
+            io.to(roomCode).emit('game-started', { currentPlayer: room.players[room.currentTurnIndex].name });
+            io.to(room.players[room.currentTurnIndex].id).emit('your-turn', room.drawingHistory);
         });
 
         io.to(roomCode).emit('game-started', { currentPlayer: room.players[room.currentTurnIndex].name });

@@ -40,7 +40,14 @@
         <h2>Verbundene Spieler:</h2>
         <div id="player-list">Warte auf Spieler...</div>
         <br><br>
-        <button onclick="startGame()">Spiel starten</button>
+        <!-- NEU: Kategorie-Auswahl -->
+                <select id="category-select" style="padding: 10px; font-size: 18px; margin-bottom: 20px; border-radius: 5px; width: 80%; max-width: 300px;">
+                    <option value="Tiere">Tiere</option>
+                    <option value="Essen">Essen</option>
+                    <option value="Gegenstände">Gegenstände</option>
+                    <option value="Orte & Gebäude">Orte & Gebäude</option>
+                </select><br>
+                <button onclick="startGame()">Spiel starten</button>
     </div>
 
     <!-- SPIEL BILDSCHIRM -->
@@ -93,17 +100,18 @@
 
         // 2. Spiel starten
         function startGame() {
-            socket.emit('start-game', currentRoomCode);
-        }
+                    const cat = document.getElementById('category-select').value;
+                    socket.emit('start-game', { roomCode: currentRoomCode, category: cat });
+                }
 
         // 3. Rollen und UI Updates
         socket.on('role-info', (data) => {
-            if (data.isSpy) {
-                document.getElementById('role-display').innerText = "🤫 Du bist der FAKE ARTIST! Versuche nicht aufzufallen.";
-            } else {
-                document.getElementById('role-display').innerText = `🎨 Das geheime Wort ist: ${data.word}`;
-            }
-        });
+                    if (data.isSpy) {
+                        document.getElementById('role-display').innerHTML = `Kategorie: <strong>${data.category}</strong><br><br>🤫 Du bist der FAKE ARTIST!`;
+                    } else {
+                        document.getElementById('role-display').innerHTML = `Kategorie: <strong>${data.category}</strong><br><br>🎨 Das Wort ist: <strong>${data.word}</strong>`;
+                    }
+                });
 
         socket.on('game-started', (data) => {
             document.getElementById('lobby').style.display = 'none';
