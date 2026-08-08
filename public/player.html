@@ -2,133 +2,179 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Fake Artist - Handy</title>
+    <!-- WICHTIG FÜR HANDYS: Verhindert automatisches Zoomen beim Tippen -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Fake Artist - Spieler</title>
     <script src="/socket.io/socket.io.js"></script>
     <style>
-        body { font-family: sans-serif; background: #2c3e50; color: white; text-align: center; padding: 15px; touch-action: none; }
-        input, button { width: 90%; padding: 15px; margin: 10px 0; font-size: 20px; border-radius: 8px; border: none; box-sizing: border-box; }
-        input { text-align: center; }
-        #room-code { text-transform: uppercase; font-family: monospace; letter-spacing: 2px; font-weight: bold; font-size: 24px; color: #f1c40f; background: #34495e; border: 2px solid #f1c40f; }
-        button { background: #e74c3c; color: white; font-weight: bold; cursor: pointer; }
-        #touch-pad { background: white; border-radius: 10px; border: 2px solid #ccc; width: 100%; max-width: 600px; aspect-ratio: 4/3; margin-top: 15px; }
-        .role-card { background: #34495e; padding: 15px; border-radius: 8px; font-size: 20px; margin-bottom: 15px; }
+        body { font-family: sans-serif; background: #1a252f; color: white; text-align: center; margin-top: 20px; }
+        /* touch-action: none verhindert, dass die Seite beim Zeichnen scrollt */
+        #canvas { background: white; border-radius: 8px; border: 4px solid #34495e; touch-action: none; max-width: 100%; }
+        button { padding: 15px 30px; font-size: 22px; background: #3498db; color: white; border: none; border-radius: 5px; cursor: pointer; transition: 0.3s; margin: 5px; }
+        button:hover { background: #2980b9; }
+        input { padding: 12px; font-size: 20px; border-radius: 5px; border: none; margin-bottom: 10px; text-align: center; width: 80%; max-width: 300px; }
+        .instruction { font-size: 20px; color: #bdc3c7; margin-bottom: 20px; }
+        #role-display { color: #f1c40f; font-size: 22px; margin-bottom: 10px; font-weight: bold; }
+        
+        /* Voting Style */
+        #voting-section { background-color: #2c3e50; padding: 20px; border-radius: 10px; margin-top: 20px; display: none; }
+        #voting-buttons button { background: #e74c3c; font-size: 18px; }
+        #voting-buttons button:hover { background: #c0392b; }
     </style>
 </head>
 <body>
+    <h1>🎨 Fake Artist</h1>
+    
+    <!-- JOIN BILDSCHIRM -->
     <div id="join-screen">
-        <h2>Spiel beitreten</h2>
-        <p>Schau auf den Hauptbildschirm für den Code!</p>
-        <input type="text" id="room-code" placeholder="RAUM-CODE" maxlength="4">
-        <input type="text" id="name" placeholder="Dein Name">
-        <button onclick="join()">Beitreten</button>
+        <p class="instruction">Gib deinen Namen und den Raumcode ein:</p>
+        <input type="text" id="name-input" placeholder="Dein Name" autocomplete="off"><br>
+        <input type="text" id="code-input" placeholder="Raumcode" autocomplete="off" style="text-transform: uppercase;"><br>
+        <button onclick="joinRoom()">Beitreten</button>
     </div>
 
-    <div id="wait-screen" style="display:none;">
-        <h3>Erfolgreich in Raum <span id="display-room" style="color: #f1c40f;"></span>!</h3>
-        <p>Warte auf den Start durch den Host...</p>
+    <!-- LOBBY -->
+    <div id="lobby" style="display:none;">
+        <p class="instruction">Erfolgreich beigetreten! 🎉</p>
+        <h2>Warte auf den Host, um das Spiel zu starten...</h2>
     </div>
 
-    <div id="play-screen" style="display:none;">
-        <div id="role-display" class="role-card"></div>
-        <h3 id="turn-info">Warte, bis du dran bist...</h3>
-        <canvas id="touch-pad" width="600" height="450" style="display:none;"></canvas>
-        <button id="done-btn" style="display:none;" onclick="finishTurn()">Strich fertig!</button>
+    <!-- SPIEL BILDSCHIRM -->
+    <div id="game-screen" style="display:none;">
+        <div id="role-display">Rolle wird geladen...</div>
+        <h2 id="status">Warte auf Zug...</h2>
+        
+        <canvas id="canvas" width="600" height="450"></canvas>
+        <br>
+        <button id="finish-btn" style="display: none; background: #e74c3c;" onclick="finishTurn()">Zug beenden</button>
+
+        <!-- ABSTIMMUNG FÜR SPIELER -->
+        <div id="voting-section">
+            <h2>Wer ist der Fake Artist?</h2>
+            <div id="voting-buttons"></div>
+        </div>
     </div>
 
     <script>
         const socket = io();
-        let myTurn = false;
-        let hasDrawn = false;
-        let myRoomCode = '';
-        
-        const canvas = document.getElementById('touch-pad');
+        const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
+        
+        let currentRoomCode = '';
+        let isMyTurn = false;
+        let isDrawing = false;
 
-        function join() {
-            const name = document.getElementById('name').value;
-            const roomCode = document.getElementById('room-code').value;
-            if (name && roomCode) {
-                socket.emit('join-room', { name, roomCode });
-            } else {
-                alert("Bitte einen Namen und den Raum-Code eingeben!");
+        // 1. Raum beitreten
+        function joinRoom() {
+            const name = document.getElementById('name-input').value.trim() || "Spieler";
+            const code = document.getElementById('code-input').value.trim().toUpperCase();
+            if(code) {
+                socket.emit('join-room', { roomCode: code, name: name });
             }
         }
 
         socket.on('error-msg', (msg) => alert(msg));
 
         socket.on('joined-success', (code) => {
-            myRoomCode = code;
+            currentRoomCode = code;
             document.getElementById('join-screen').style.display = 'none';
-            document.getElementById('wait-screen').style.display = 'block';
-            document.getElementById('display-room').innerText = code;
+            document.getElementById('lobby').style.display = 'block';
         });
 
+        // 2. Spiel Infos empfangen
         socket.on('role-info', (data) => {
-            document.getElementById('wait-screen').style.display = 'none';
-            document.getElementById('play-screen').style.display = 'block';
-            
-            const roleCard = document.getElementById('role-display');
             if (data.isSpy) {
-                roleCard.innerHTML = '<b style="color:#e74c3c;">Du bist der SPION!</b>';
+                document.getElementById('role-display').innerText = "🤫 Du bist der FAKE ARTIST! Versuch dich anzupassen.";
             } else {
-                roleCard.innerHTML = `Das Wort ist: <b style="color:#2ecc71;">${data.word}</b>`;
+                document.getElementById('role-display').innerText = `🎨 Das geheime Wort ist: ${data.word}`;
             }
         });
 
+        socket.on('game-started', (data) => {
+            document.getElementById('lobby').style.display = 'none';
+            document.getElementById('game-screen').style.display = 'block';
+            document.getElementById('status').innerText = `${data.currentPlayer} ist am Zug!`;
+        });
+
+        socket.on('next-turn', (data) => {
+            document.getElementById('status').innerText = `${data.currentPlayer} ist am Zug!`;
+        });
+
+        // 3. Eigener Zug
         socket.on('your-turn', (history) => {
-            myTurn = true;
-            hasDrawn = false;
-            document.getElementById('turn-info').innerText = "Du bist dran! Zeichne hier:";
-            canvas.style.display = 'block';
-            
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            if (history) {
-                history.forEach(data => drawData(data));
+            isMyTurn = true;
+            document.getElementById('status').innerText = "Du bist dran! Zeichne einen Strich.";
+            document.getElementById('finish-btn').style.display = 'inline-block';
+        });
+
+        function finishTurn() {
+            if (isMyTurn) {
+                isMyTurn = false;
+                document.getElementById('finish-btn').style.display = 'none';
+                socket.emit('finish-turn', currentRoomCode);
+                document.getElementById('status').innerText = "Zug beendet. Warte...";
             }
-        });
-        // Variable für den Raumcode (stelle sicher, dass dein aktueller Raumcode in 'currentRoomCode' gespeichert ist)
-        let currentRoomCode = "";
-        socket.on('joined-success', (code) => {
-            currentRoomCode = code; // Speichert den Code, sobald der Spieler beitritt
-        });
+        }
 
-        // Wenn der Server das Voting startet
-        socket.on('start-voting', (players) => {
-            document.getElementById('voting-section').style.display = 'block';
-            const votingDiv = document.getElementById('voting-buttons');
-            votingDiv.innerHTML = '';
-
-            players.forEach(p => {
-                // Spieler können nicht für sich selbst abstimmen
-                if (p.id !== socket.id) {
-                    const btn = document.createElement('button');
-                    btn.innerText = p.name;
-                    btn.style.margin = '5px';
-                    btn.style.padding = '10px 20px';
-                    btn.style.cursor = 'pointer';
-                    
-                    btn.onclick = () => {
-                        socket.emit('submit-vote', { roomCode: currentRoomCode, votedForId: p.id });
-                        votingDiv.innerHTML = '<p><strong>Abstimmung abgegeben!</strong> Warte auf die anderen Spieler...</p>';
-                    };
-                    votingDiv.appendChild(btn);
-                }
-            });
-        });
-
-        // Wenn alle abgestimmt haben
-        socket.on('game-over', (data) => {
-            document.getElementById('voting-section').style.display = 'none';
+        // 4. Zeichen-Logik für MAUS und TOUCH (Handy)
+        function getMousePos(evt) {
+            const rect = canvas.getBoundingClientRect();
+            // Prüfen, ob es ein Touch-Event (Handy) oder Maus-Event (PC) ist
+            const clientX = evt.touches ? evt.touches[0].clientX : evt.clientX;
+            const clientY = evt.touches ? evt.touches[0].clientY : evt.clientY;
             
-            // Kleines Pop-Up für das dramatische Finale
-            alert(`🔥 DIE ABSTIMMUNG IST VORBEI 🔥\n\nDas geheime Wort war: ${data.word}\nDer wahre Fake Artist war: ${data.spyName}`);
+            // Berechnet das richtige Verhältnis, falls das Canvas via CSS verkleinert wurde
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+
+            return {
+                x: (clientX - rect.left) * scaleX,
+                y: (clientY - rect.top) * scaleY
+            };
+        }
+
+        function startPosition(e) {
+            if (!isMyTurn) return;
+            e.preventDefault(); // Verhindert Scrollen auf dem Handy
+            isDrawing = true;
+            const pos = getMousePos(e);
+            socket.emit('draw-stroke', { roomCode: currentRoomCode, stroke: { type: 'start', x: pos.x, y: pos.y } });
+        }
+
+        function endPosition(e) {
+            if (!isMyTurn) return;
+            e.preventDefault();
+            isDrawing = false;
+        }
+
+        function draw(e) {
+            if (!isDrawing || !isMyTurn) return;
+            e.preventDefault();
+            const pos = getMousePos(e);
+            socket.emit('draw-stroke', { roomCode: currentRoomCode, stroke: { type: 'move', x: pos.x, y: pos.y } });
+        }
+
+        // Event Listener PC (Maus)
+        canvas.addEventListener('mousedown', startPosition);
+        canvas.addEventListener('mouseup', endPosition);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseout', endPosition);
+
+        // Event Listener Handy (Touch) mit { passive: false } um Scrollen zu blockieren
+        canvas.addEventListener('touchstart', startPosition, { passive: false });
+        canvas.addEventListener('touchend', endPosition, { passive: false });
+        canvas.addEventListener('touchmove', draw, { passive: false });
+
+        // 5. Striche synchronisieren
+        socket.on('clear-canvas', () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
         });
 
-        function drawData(data) {
+        socket.on('draw-stroke-all', (data) => {
             ctx.lineWidth = 4;
             ctx.lineCap = 'round';
             ctx.strokeStyle = '#2c3e50';
+
             if (data.type === 'start') {
                 ctx.beginPath();
                 ctx.moveTo(data.x, data.y);
@@ -136,57 +182,34 @@
                 ctx.lineTo(data.x, data.y);
                 ctx.stroke();
             }
-        }
-
-        socket.on('draw-stroke-all', (data) => {
-            if (myTurn) drawData(data);
         });
 
-        function getCoords(e) {
-            const rect = canvas.getBoundingClientRect();
-            const touch = e.touches[0] || e.changedTouches[0];
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            return {
-                x: (touch.clientX - rect.left) * scaleX,
-                y: (touch.clientY - rect.top) * scaleY
-            };
-        }
+        // 6. Abstimmung
+        socket.on('start-voting', (players) => {
+            document.getElementById('voting-section').style.display = 'block';
+            document.getElementById('finish-btn').style.display = 'none';
+            document.getElementById('status').innerText = "Zeit zur Abstimmung!";
+            const votingDiv = document.getElementById('voting-buttons');
+            votingDiv.innerHTML = '';
 
-        canvas.addEventListener('touchstart', (e) => {
-            if (!myTurn || hasDrawn) return;
-            e.preventDefault();
-            const coords = getCoords(e);
-            socket.emit('draw-stroke', { roomCode: myRoomCode, stroke: { type: 'start', x: coords.x, y: coords.y } });
+            players.forEach(p => {
+                if (p.id !== socket.id) {
+                    const btn = document.createElement('button');
+                    btn.innerText = p.name;
+                    btn.onclick = () => {
+                        socket.emit('submit-vote', { roomCode: currentRoomCode, votedForId: p.id });
+                        votingDiv.innerHTML = '<p>Abstimmung abgegeben! Warte auf die anderen...</p>';
+                    };
+                    votingDiv.appendChild(btn);
+                }
+            });
         });
 
-        canvas.addEventListener('touchmove', (e) => {
-            if (!myTurn || hasDrawn) return;
-            e.preventDefault();
-            const coords = getCoords(e);
-            socket.emit('draw-stroke', { roomCode: myRoomCode, stroke: { type: 'move', x: coords.x, y: coords.y } });
+        socket.on('game-over', (data) => {
+            document.getElementById('voting-section').style.display = 'none';
+            alert(`🔥 SPIEL ENDE 🔥\n\nDas Wort war: ${data.word}\nDer Spion war: ${data.spyName}`);
+            location.reload();
         });
-
-        canvas.addEventListener('touchend', (e) => {
-            if (!myTurn || hasDrawn) return;
-            e.preventDefault();
-            hasDrawn = true;
-            document.getElementById('done-btn').style.display = 'block';
-        });
-
-        function finishTurn() {
-            myTurn = false;
-            canvas.style.display = 'none';
-            document.getElementById('done-btn').style.display = 'none';
-            document.getElementById('turn-info').innerText = "Strich übertragen! Warte auf die anderen...";
-            socket.emit('finish-turn', myRoomCode);
-        }
     </script>
-    <!-- ABSTIMMUNGS-BEREICH -->
-    <div id="voting-section" style="display: none; margin-top: 20px; padding: 15px; border: 2px solid #333; background-color: #f9f9f9; text-align: center;">
-        <h2>Wer ist der Fake Artist?</h2>
-        <p>Gib deine Stimme ab:</p>
-        <div id="voting-buttons"></div>
-    </div>
 </body>
 </html>
