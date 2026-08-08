@@ -87,6 +87,43 @@
                 history.forEach(data => drawData(data));
             }
         });
+        // Variable für den Raumcode (stelle sicher, dass dein aktueller Raumcode in 'currentRoomCode' gespeichert ist)
+        let currentRoomCode = "";
+        socket.on('joined-success', (code) => {
+            currentRoomCode = code; // Speichert den Code, sobald der Spieler beitritt
+        });
+
+        // Wenn der Server das Voting startet
+        socket.on('start-voting', (players) => {
+            document.getElementById('voting-section').style.display = 'block';
+            const votingDiv = document.getElementById('voting-buttons');
+            votingDiv.innerHTML = '';
+
+            players.forEach(p => {
+                // Spieler können nicht für sich selbst abstimmen
+                if (p.id !== socket.id) {
+                    const btn = document.createElement('button');
+                    btn.innerText = p.name;
+                    btn.style.margin = '5px';
+                    btn.style.padding = '10px 20px';
+                    btn.style.cursor = 'pointer';
+                    
+                    btn.onclick = () => {
+                        socket.emit('submit-vote', { roomCode: currentRoomCode, votedForId: p.id });
+                        votingDiv.innerHTML = '<p><strong>Abstimmung abgegeben!</strong> Warte auf die anderen Spieler...</p>';
+                    };
+                    votingDiv.appendChild(btn);
+                }
+            });
+        });
+
+        // Wenn alle abgestimmt haben
+        socket.on('game-over', (data) => {
+            document.getElementById('voting-section').style.display = 'none';
+            
+            // Kleines Pop-Up für das dramatische Finale
+            alert(`🔥 DIE ABSTIMMUNG IST VORBEI 🔥\n\nDas geheime Wort war: ${data.word}\nDer wahre Fake Artist war: ${data.spyName}`);
+        });
 
         function drawData(data) {
             ctx.lineWidth = 4;
@@ -145,5 +182,11 @@
             socket.emit('finish-turn', myRoomCode);
         }
     </script>
+    <!-- ABSTIMMUNGS-BEREICH -->
+    <div id="voting-section" style="display: none; margin-top: 20px; padding: 15px; border: 2px solid #333; background-color: #f9f9f9; text-align: center;">
+        <h2>Wer ist der Fake Artist?</h2>
+        <p>Gib deine Stimme ab:</p>
+        <div id="voting-buttons"></div>
+    </div>
 </body>
 </html>

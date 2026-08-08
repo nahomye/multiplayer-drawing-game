@@ -1,32 +1,27 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const path = require('path'); // <-- NEU: Path-Modul geladen
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// NEU: Absoluter Pfad für den public-Ordner (Kugelsicher für Render)
 app.use(express.static(path.join(__dirname, 'public')));
 
 const words = ["Elefant", "Eiffelturm", "Fahrrad", "Schneemann", "Pizza", "Hubschrauber", "Gitarre", "Kaffeetasse", "Pyramide", "Pinguin"];
-
-// Das wichtigste Neue: Wir speichern die Spieldaten jetzt PRO RAUM, nicht mehr global.
 const rooms = {};
 
-// Generiert einen zufälligen 4-stelligen Raumcode
 function generateRoomCode() {
     let code;
     do {
         code = Math.random().toString(36).substring(2, 6).toUpperCase();
-    } while (rooms[code]); // Sicherstellen, dass der Code nicht schon existiert
+    } while (rooms[code]);
     return code;
 }
 
 io.on('connection', (socket) => {
     
-    // 1. Host erstellt einen Raum
     socket.on('create-room', () => {
         const roomCode = generateRoomCode();
         rooms[roomCode] = {
@@ -38,14 +33,13 @@ io.on('connection', (socket) => {
             currentTurnIndex: 0,
             currentRound: 1,
             maxRounds: 2,
-            gameStarted: false
+            gameStarted: false,
+            votes: {} // NEU: Speicher für die Abstimmung
         };
-        // Der Host betritt den "Socket-Raum"
         socket.join(roomCode);
         socket.emit('room-created', roomCode);
     });
 
-    // 2. Spieler betritt einen bestimmten Raum mit Code
     socket.on('join-room', (data) => {
         const roomCode = data.roomCode.toUpperCase();
         const room = rooms[roomCode];
@@ -60,17 +54,14 @@ io.on('connection', (socket) => {
         }
 
         room.players.push({ id: socket.id, name: data.name });
-        socket.join(roomCode); // Spieler betritt den Socket-Raum
+        socket.join(roomCode);
         
-        // Nur die Spieler in diesem bestimmten Raum updaten
         io.to(roomCode).emit('update-players', room.players);
         socket.emit('joined-success', roomCode);
     });
 
-    // 3. Host startet das Spiel für seinen Raum
     socket.on('start-game', (roomCode) => {
         const room = rooms[roomCode];
-        // Sicherheit: Nur der echte Host dieses Raums darf starten
         if (!room || room.hostSocketId !== socket.id) return;
 
         if (room.players.length < 3) {
@@ -80,6 +71,7 @@ io.on('connection', (socket) => {
 
         room.gameStarted = true;
         room.drawingHistory = [];
+        room.votes = {}; // Stimmen zum Start zurücksetzen
         io.to(roomCode).emit('clear-canvas');
 
         room.secretWord = words[Math.floor(Math.random() * words.length)];
@@ -100,17 +92,14 @@ io.on('connection', (socket) => {
         io.to(room.players[room.currentTurnIndex].id).emit('your-turn', room.drawingHistory);
     });
 
-    // 4. Zeichnen - jetzt raumspezifisch
     socket.on('draw-stroke', (data) => {
-        const roomCode = data.roomCode;
-        const room = rooms[roomCode];
+        const room = rooms[data.roomCode];
         if(room) {
             room.drawingHistory.push(data.stroke);
-            io.to(roomCode).emit('draw-stroke-all', data.stroke); // Nur an diesen Raum senden
+            io.to(data.roomCode).emit('draw-stroke-all', data.stroke); 
         }
     });
 
-    // 5. Zug beenden
     socket.on('finish-turn', (roomCode) => {
         const room = rooms[roomCode];
         if(!room) return;
@@ -122,9 +111,9 @@ io.on('connection', (socket) => {
         }
 
         if (room.currentRound > room.maxRounds) {
-            const spyName = room.players.find(p => p.id === room.spySocketId)?.name || "Unbekannt";
-            io.to(roomCode).emit('game-over', { word: room.secretWord, spyName: spyName });
-            room.gameStarted = false;
+            // NEU: Voting-Phase einleiten
+            room.votes = {}; 
+            io.to(roomCode).emit('start-voting', room.players);
         } else {
             const nextPlayer = room.players[room.currentTurnIndex];
             io.to(roomCode).emit('next-turn', { currentPlayer: nextPlayer.name });
@@ -132,7 +121,25 @@ io.on('connection', (socket) => {
         }
     });
 
-    // 6. Spieler verlässt Spiel
+    // NEU: Abstimmungseingänge verarbeiten
+    socket.on('submit-vote', (data) => {
+        const room = rooms[data.roomCode];
+        if (!room) return;
+
+        room.votes[socket.id] = data.votedForId;
+
+        // Sobald alle Spieler im Raum abgestimmt haben
+        if (Object.keys(room.votes).length === room.players.length) {
+            const spyName = room.players.find(p => p.id === room.spySocketId)?.name || "Unbekannt";
+            
+            io.to(data.roomCode).emit('game-over', { 
+                word: room.secretWord, 
+                spyName: spyName 
+            });
+            room.gameStarted = false;
+        }
+    });
+
     socket.on('disconnect', () => {
         for (const roomCode in rooms) {
             const room = rooms[roomCode];
@@ -145,9 +152,7 @@ io.on('connection', (socket) => {
     });
 });
 
-// NEU: Dynamischer Port von Render
 const PORT = process.env.PORT || 3000; 
-
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server läuft auf Port ${PORT}`);
 });
