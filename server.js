@@ -22,23 +22,29 @@ function generateRoomCode() {
 
 io.on('connection', (socket) => {
     
-    socket.on('create-room', () => {
-        const roomCode = generateRoomCode();
-        rooms[roomCode] = {
-            hostSocketId: socket.id,
-            players: [],
-            drawingHistory: [],
-            secretWord: "",
-            spySocketId: null,
-            currentTurnIndex: 0,
-            currentRound: 1,
-            maxRounds: 2,
-            gameStarted: false,
-            votes: {} // NEU: Speicher für die Abstimmung
-        };
-        socket.join(roomCode);
-        socket.emit('room-created', roomCode);
-    });
+    // 1. Host erstellt einen Raum und spielt selbst mit
+        socket.on('create-room', (hostName) => {
+            const roomCode = generateRoomCode();
+            rooms[roomCode] = {
+                hostSocketId: socket.id,
+                // NEU: Der Host wird direkt als erster Spieler in die Liste gepackt!
+                players: [{ id: socket.id, name: hostName || "Host" }],
+                drawingHistory: [],
+                secretWord: "",
+                spySocketId: null,
+                currentTurnIndex: 0,
+                currentRound: 1,
+                maxRounds: 2,
+                gameStarted: false,
+                votes: {}
+            };
+            
+            socket.join(roomCode);
+            socket.emit('room-created', roomCode);
+            
+            // Das Lobby-Update direkt an den Host senden, damit er sich selbst in der Liste sieht
+            io.to(roomCode).emit('update-players', rooms[roomCode].players);
+        });
 
     socket.on('join-room', (data) => {
         const roomCode = data.roomCode.toUpperCase();
