@@ -16,6 +16,9 @@ const categories = {
     "Gegenstände": ["Fahrrad", "Kaffeetasse", "Gitarre", "Hubschrauber", "Schneemann"],
     "Orte & Gebäude": ["Eiffelturm", "Pyramide", "Krankenhaus", "Flughafen", "Gefängnis"]
 };
+
+// NEU: Der Farbkasten für die Spieler (Rot, Blau, Grün, Lila, Gelb, Orange, Türkis, Pink)
+const ROOM_COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#9b59b6', '#f1c40f', '#e67e22', '#1abc9c', '#e84393'];
 const rooms = {};
 
 function generateRoomCode() {
@@ -28,12 +31,17 @@ function generateRoomCode() {
 
 io.on('connection', (socket) => {
     
-    // 1. Host erstellt einen Raum und spielt selbst mit
     socket.on('create-room', (hostName) => {
         const roomCode = generateRoomCode();
+        // Mische die Farben oder kopiere sie einfach
+        const availableColors = [...ROOM_COLORS];
+        const hostColor = availableColors.shift(); // Der Host bekommt die erste Farbe
+
         rooms[roomCode] = {
             hostSocketId: socket.id,
-            players: [{ id: socket.id, name: hostName || "Host" }],
+            availableColors: availableColors,
+            // NEU: Farbe wird direkt gespeichert
+            players: [{ id: socket.id, name: hostName || "Host", color: hostColor }],
             drawingHistory: [],
             secretWord: "",
             spySocketId: null,
@@ -46,8 +54,6 @@ io.on('connection', (socket) => {
             
         socket.join(roomCode);
         socket.emit('room-created', roomCode);
-            
-        // Das Lobby-Update direkt an den Host senden, damit er sich selbst in der Liste sieht
         io.to(roomCode).emit('update-players', rooms[roomCode].players);
     });
 
@@ -60,11 +66,14 @@ io.on('connection', (socket) => {
             return;
         }
         if (room.gameStarted) {
-            socket.emit('error-msg', 'Das Spiel in diesem Raum läuft bereits!');
+            socket.emit('error-msg', 'Das Spiel läuft bereits!');
             return;
         }
 
-        room.players.push({ id: socket.id, name: data.name });
+        // NEU: Spieler bekommt die nächste freie Farbe (oder Grau, falls voll)
+        const playerColor = room.availableColors.shift() || '#95a5a6';
+        
+        room.players.push({ id: socket.id, name: data.name, color: playerColor });
         socket.join(roomCode);
         
         io.to(roomCode).emit('update-players', room.players);
@@ -72,13 +81,11 @@ io.on('connection', (socket) => {
     });
 
     socket.on('start-game', (data) => {
-        // Wir empfangen jetzt den Code UND die Kategorie vom Host
         const roomCode = data.roomCode;
         const categoryName = data.category;
         const room = rooms[roomCode];
             
         if (!room || room.hostSocketId !== socket.id) return;
-
         if (room.players.length < 3) {
             socket.emit('error-msg', 'Mindestens 3 Spieler erforderlich!');
             return;
@@ -89,7 +96,6 @@ io.on('connection', (socket) => {
         room.votes = {};
         io.to(roomCode).emit('clear-canvas');
 
-        // Wort aus der gewählten Kategorie aussuchen
         const wordList = categories[categoryName];
         room.secretWord = wordList[Math.floor(Math.random() * wordList.length)];
             
@@ -98,7 +104,6 @@ io.on('connection', (socket) => {
         room.currentTurnIndex = 0;
         room.currentRound = 1;
 
-        // Wir senden die Kategorie an ALLE, aber das Wort nur an die echten Künstler
         room.players.forEach(p => {
             if (p.id === room.spySocketId) {
                 io.to(p.id).emit('role-info', { isSpy: true, category: categoryName });
@@ -109,7 +114,7 @@ io.on('connection', (socket) => {
 
         io.to(roomCode).emit('game-started', { currentPlayer: room.players[room.currentTurnIndex].name });
         io.to(room.players[room.currentTurnIndex].id).emit('your-turn', room.drawingHistory);
-    }); // <-- Hier war der doppelte Code-Salat. Jetzt ist alles sauber!
+    });
 
     socket.on('draw-stroke', (data) => {
         const room = rooms[data.roomCode];
@@ -130,7 +135,6 @@ io.on('connection', (socket) => {
         }
 
         if (room.currentRound > room.maxRounds) {
-            // Voting-Phase einleiten
             room.votes = {};
             io.to(roomCode).emit('start-voting', room.players);
         } else {
@@ -140,17 +144,14 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Abstimmungseingänge verarbeiten
     socket.on('submit-vote', (data) => {
         const room = rooms[data.roomCode];
         if (!room) return;
 
         room.votes[socket.id] = data.votedForId;
 
-        // Sobald alle Spieler im Raum abgestimmt haben
         if (Object.keys(room.votes).length === room.players.length) {
             const spyName = room.players.find(p => p.id === room.spySocketId)?.name || "Unbekannt";
-            
             io.to(data.roomCode).emit('game-over', {
                 word: room.secretWord,
                 spyName: spyName
@@ -163,6 +164,7 @@ io.on('connection', (socket) => {
         for (const roomCode in rooms) {
             const room = rooms[roomCode];
             const initialLength = room.players.length;
+            // Wir filtern den disconnected Spieler raus
             room.players = room.players.filter(p => p.id !== socket.id);
             if (room.players.length !== initialLength) {
                 io.to(roomCode).emit('update-players', room.players);
